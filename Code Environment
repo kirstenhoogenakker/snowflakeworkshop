@@ -1,0 +1,6 @@
+snowflake-snowpark-python
+snowflake-connector-python[pandas]
+matplotlib
+scikit-learn
+cachetools
+joblib
