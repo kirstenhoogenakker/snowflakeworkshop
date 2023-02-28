@@ -1,0 +1,83 @@
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# #### Importing the relevant libraries
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+import dataiku
+import pandas as pd, numpy as np
+from dataiku import pandasutils as pdu
+from snowflake.snowpark import functions as F
+from snowflake.snowpark.types import IntegerType
+from dataiku.snowpark import DkuSnowpark
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import udf
+from snowflake.snowpark.session import Session
+from snowflake.snowpark import functions as F
+from snowflake.snowpark import version
+from snowflake.snowpark.types import *
+from snowflake.snowpark.functions import when, col, lit, avg, stddev, stddev_pop , round, log
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Creating the session
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+dku_snowpark = DkuSnowpark()
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Reading the datasets
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+LOANS = dataiku.Dataset("LOANS_ENRICHED_joined_prepared")
+snowdf = dku_snowpark.get_dataframe(LOANS)
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Lets do Feature Engineering using SnowPark
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### We will create a new column EMP_BUCKET,  select top 5 Emp Title and rest NA
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+snowdf = snowdf.withColumn('EMP_BUCKET',
+                               when(snowdf.EMP_TITLE == 'teacher','teacher' )
+                               .when(snowdf.EMP_TITLE == 'manager', 'manager')
+                              .when(snowdf.EMP_TITLE == 'registered nurse', 'registered nurse')
+                           .when(snowdf.EMP_TITLE == 'driver', 'driver')
+                            .when(snowdf.EMP_TITLE == 'owner', 'owner')
+                               .otherwise('NA'))
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Scaling INSTALLMENT column by creating INSTALL_NORM column
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+# Define max and min values and collect them
+mean_installement = snowdf.agg({'INSTALLMENT': 'mean'}).collect()[0][0]
+stddev_installement = snowdf.agg({'INSTALLMENT': 'stddev'}).collect()[0][0]
+
+# Create a new column based off the scaled data
+snowdf = snowdf.withColumn('INSTALL_NORM',
+                  ((snowdf['INSTALLMENT'] - mean_installement) / stddev_installement))
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Imputing median value
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+# Calculate the median value
+col_median = int(snowdf.agg({'EMP_LENGTH_YEARS': 'median'}).collect()[0][0])
+
+# Replacing with the median value for that column
+snowdf=snowdf.na.fill({'EMP_LENGTH_YEARS': col_median})
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Dropping these columns 'EMP_TITLE','INSTALLMENT' as we will be using new columns for ML
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+snowdf = snowdf.drop('INSTALLMENT')
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: MARKDOWN
+# ### Create Result Table
+
+# -------------------------------------------------------------------------------- NOTEBOOK-CELL: CODE
+# get output dataset
+LOANS_FE = dataiku.Dataset("LOANS_FE")
+
+# write input dataframe to output dataset
+dku_snowpark.write_with_schema(LOANS_FE,snowdf)
